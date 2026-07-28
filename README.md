@@ -1,6 +1,6 @@
 # York County Incident Tracker
 
-A senior capstone project for a Cybersecurity degree program, exploring how well **local news coverage reflects actual emergency incidents** — and what that gap might mean for public perception of EMS, law enforcement, and media reporting.
+My senior capstone project for my Cybersecurity program, exploring how well **local news coverage reflects actual emergency incidents** and what that gap might mean for public perception of EMS, law enforcement, and media reporting.
 
 <img width="2557" height="1395" alt="1" src="https://github.com/user-attachments/assets/67530af1-e84c-45b6-bf1b-ef3b35d2bb38" />
 
