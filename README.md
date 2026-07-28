@@ -11,7 +11,9 @@ Emergency dispatch data (CAD feeds) is often public, but only a small fraction o
 1. Scrape and log real incident data from public dispatch sources.
 2. Geocode and map those incidents.
 3. Eventually cross-reference incidents against local news/RSS coverage to measure how much (or how little) overlap exists.
-4. Use that comparison to discuss bias, gaps, and framing in how emergencies are reported to the public.
+4. Combine incidents into some sort of database. At the very least, publish the dataset!
+5. Possibly impliment language model analysis of real-time incidents.
+6. Use that comparison to discuss bias, gaps, and framing in how emergencies are reported to the public.
 
 This is an active work-in-progress build, not a finished tool.
 
