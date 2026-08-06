@@ -28,17 +28,17 @@ def send_get(url = str, timeout = int):
     try:
         with httpx.Client(headers=headers) as client: 
             response = client.get(url, timeout=timeout)
-            response.raise_for_status()
+            response.raise_for_status() 
         return response.text
-    except httpx.RequestError as e:
-        raise RuntimeError(f'An error occurred while requesting {url}: {e}') from e
+    except httpx.HTTPError as e:
+        raise RuntimeError(f'An error occurred @scrape.py while requesting {url}: {e}') from e
 
 def scrape_ycdes():
     """ Scrapes ycdes.org for currently active incidents.
 
     Returns:
         list[tuple[str, str]]: an (address, incident_type) pair for
-        every active incident row, or an empty list.
+        every active incident row.
     """
     output = send_get("https://www.ycdes.org/webcad/Default.aspx", timeout=10)
     parsed = BeautifulSoup(output, 'html.parser')
