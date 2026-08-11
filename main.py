@@ -7,20 +7,23 @@ from pathlib import Path
 MODULES_DIR = Path(__file__).resolve().parent / "modules"
 sys.path.insert(0, str(MODULES_DIR))
 
-from modules.config import config
-from modules.scrape import scrape_ycdes
-from modules.database import (
+from config import config
+from scrape import scrape_ycdes
+from database import (
     get_conn,
     log_incident,
     get_all_incidents,
     log_article,
     get_unanalyzed_articles,
     save_article_analysis,
+    get_analyzed_articles,
+    save_match,
+    get_checked_pairs,
     close,
 )
-from modules.map import map_incidents
-from modules.news import get_all_articles
-from modules.llm import analyze_articles
+from map import map_incidents
+from news import get_all_articles
+from llm import analyze_articles, cross_reference
 
 MENU = """
 York County Incident Tracker
@@ -31,7 +34,8 @@ York County Incident Tracker
 4. Start polling loop
 5. Fetch RSS feeds and save articles to the database
 6. Analyze stored articles with Ollama
-7. Exit
+7. Cross-reference incidents against analyzed articles
+8. Exit
 """
 
 
@@ -43,8 +47,8 @@ def poll_and_save(conn):
         print("No active incidents found.")
         return
 
-    for address, incident_type in incidents:
-        log_incident(conn, incident_type, address)
+    for address, incident_type, dispatch_time in incidents:
+        log_incident(conn, incident_type, address, dispatch_time)
 
     print(f"Logged {len(incidents)} incident(s) to the database.")
 
@@ -131,6 +135,44 @@ def analyze_stored_news(conn):
     print("\nSaved analysis results to the database.")
 
 
+def run_cross_reference(conn):
+    incidents = get_all_incidents(conn)
+    articles = get_analyzed_articles(conn)
+
+    if not incidents or not articles:
+        print("Need at least one incident and one analyzed article - run options 1, 5, and 6 first.")
+        return
+
+    already_checked = get_checked_pairs(conn)
+    print(f"Pre-filtering {len(incidents)} incident(s) x {len(articles)} analyzed article(s)...")
+    results = asyncio.run(cross_reference(incidents, articles, already_checked=already_checked))
+
+    if not results:
+        print("No new candidate pairs passed the time/location pre-filter.")
+        return
+
+    print(f"Checked {len(results)} candidate pair(s) with Ollama:\n")
+    match_count = 0
+    for r in results:
+        if r["match"]:
+            match_count += 1
+        print("---")
+        print(f"Incident: {r['incident_type']} @ {r['address_oneline']}")
+        print(f"Article:  {r['title']}")
+        print(f"  match: {r['match']} (confidence: {r['confidence']})")
+        print(f"  reasoning: {r['reasoning']}")
+        save_match(
+            conn,
+            r["incident_fingerprint"],
+            r["article_id"],
+            r["match"],
+            r["confidence"],
+            r["reasoning"],
+        )
+
+    print(f"\n{match_count}/{len(results)} candidate pair(s) confirmed as matches. Saved to database.")
+
+
 CONSECUTIVE_FAILURE_WARNING_THRESHOLD = 5
 
 
@@ -179,6 +221,7 @@ def main():
         "4": lambda: poll_loop(conn),
         "5": lambda: fetch_and_save_news(conn),
         "6": lambda: analyze_stored_news(conn),
+        "7": lambda: run_cross_reference(conn),
     }
 
     try:
@@ -186,7 +229,7 @@ def main():
             print(MENU)
             choice = input("Select an option: ").strip()
 
-            if choice == "7":
+            if choice == "8":
                 print("Exiting.")
                 break
 
