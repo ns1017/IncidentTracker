@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     fingerprint    TEXT PRIMARY KEY,
     incident_type  TEXT NOT NULL,
     address        TEXT NOT NULL,
+    dispatch_time  TEXT,
     times_seen     INTEGER NOT NULL DEFAULT 1,
     first_seen     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -56,15 +57,47 @@ CREATE TABLE IF NOT EXISTS articles (
 );
 """
 
+# One row per incident/article pair that's been run through the LLM
+# cross-reference check (not every pair - only ones that survived the
+# programmatic time/location pre-filter in llm.py).
+MATCHES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS matches (
+    incident_fingerprint  TEXT NOT NULL,
+    article_id            TEXT NOT NULL,
+    match                 INTEGER NOT NULL,
+    confidence            TEXT,
+    reasoning             TEXT,
+    checked_at            TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (incident_fingerprint, article_id)
+);
+"""
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """
+    Lightweight migration for columns added after a table already
+    existed in the wild. SQLite has no "ADD COLUMN IF NOT EXISTS", so
+    this just tries the ALTER and ignores the error if it's already
+    there. Existing rows get dispatch_time = NULL (there's no way to
+    recover a dispatch time we never captured for old rows) - that's
+    fine, the cross-reference step falls back to first_seen for those.
+    """
+    try:
+        conn.execute("ALTER TABLE incidents ADD COLUMN dispatch_time TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
 
 def get_conn(db_path: str = DB_PATH) -> sqlite3.Connection:
     """
-    Opens (and if needed, creates) the database and makes sure both
-    the incidents and articles tables exist.
+    Opens (and if needed, creates) the database and makes sure the
+    incidents, articles, and matches tables all exist.
     """
     conn = sqlite3.connect(db_path)
     conn.execute(SCHEMA)
     conn.execute(ARTICLES_SCHEMA)
+    conn.execute(MATCHES_SCHEMA)
+    _migrate(conn)
     conn.commit()
     return conn
 
@@ -83,24 +116,30 @@ def fingerprint(incident_type: str, address: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def log_incident(conn: sqlite3.Connection, incident_type: str, address: str) -> str:
+def log_incident(
+    conn: sqlite3.Connection,
+    incident_type: str,
+    address: str,
+    dispatch_time: str | None = None,
+) -> str:
     """
     Inserts a new incident, or if it's already been seen (same
     fingerprint), bumps last_seen and times_seen instead of
-    duplicating the row.
+    duplicating the row. dispatch_time is only set on first insert -
+    like first_seen, it shouldn't change on a repeat sighting.
 
     Returns the fingerprint for the logged incident.
     """
     fp = fingerprint(incident_type, address)
     conn.execute(
         """
-        INSERT INTO incidents (fingerprint, incident_type, address)
-        VALUES (?, ?, ?)
+        INSERT INTO incidents (fingerprint, incident_type, address, dispatch_time)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT(fingerprint) DO UPDATE SET
             times_seen = times_seen + 1,
             last_seen = CURRENT_TIMESTAMP
         """,
-        (fp, incident_type, address),
+        (fp, incident_type, address, dispatch_time),
     )
     conn.commit()
     return fp
@@ -174,6 +213,54 @@ def get_all_articles_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     conn.row_factory = sqlite3.Row
     cur = conn.execute("SELECT * FROM articles ORDER BY fetched_at DESC")
     return cur.fetchall()
+
+
+def get_analyzed_articles(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """
+    Returns every article that's already been through LLM extraction -
+    only these are useful for cross-referencing, since incident_type/
+    location_mentioned/time_reference are what the pre-filter and the
+    match check both rely on.
+    """
+    conn.row_factory = sqlite3.Row
+    cur = conn.execute(
+        "SELECT * FROM articles WHERE analyzed_at IS NOT NULL ORDER BY fetched_at DESC"
+    )
+    return cur.fetchall()
+
+
+def save_match(
+    conn: sqlite3.Connection,
+    incident_fingerprint: str,
+    article_id: str,
+    match: bool,
+    confidence: str | None,
+    reasoning: str | None,
+) -> None:
+    """Records (or updates) the LLM's confirm/deny judgment for one incident/article pair."""
+    conn.execute(
+        """
+        INSERT INTO matches (incident_fingerprint, article_id, match, confidence, reasoning)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(incident_fingerprint, article_id) DO UPDATE SET
+            match = excluded.match,
+            confidence = excluded.confidence,
+            reasoning = excluded.reasoning,
+            checked_at = CURRENT_TIMESTAMP
+        """,
+        (incident_fingerprint, article_id, int(match), confidence, reasoning),
+    )
+    conn.commit()
+
+
+def get_checked_pairs(conn: sqlite3.Connection) -> set[tuple[str, str]]:
+    """
+    Returns every (incident_fingerprint, article_id) pair already run
+    through the LLM match check, so cross_reference() can skip
+    re-checking (and re-spending an LLM call on) the same pair twice.
+    """
+    cur = conn.execute("SELECT incident_fingerprint, article_id FROM matches")
+    return {(row[0], row[1]) for row in cur.fetchall()}
 
 
 def close(conn: sqlite3.Connection) -> None:
