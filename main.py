@@ -1,4 +1,4 @@
-
+import asyncio
 import sys
 import time
 import traceback
@@ -9,8 +9,18 @@ sys.path.insert(0, str(MODULES_DIR))
 
 from modules.config import config
 from modules.scrape import scrape_ycdes
-from modules.database import get_conn, log_incident, get_all_incidents, close
+from modules.database import (
+    get_conn,
+    log_incident,
+    get_all_incidents,
+    log_article,
+    get_unanalyzed_articles,
+    save_article_analysis,
+    close,
+)
 from modules.map import map_incidents
+from modules.news import get_all_articles
+from modules.llm import analyze_articles
 
 MENU = """
 York County Incident Tracker
@@ -19,7 +29,9 @@ York County Incident Tracker
 2. Map stored incidents
 3. List saved incidents
 4. Start polling loop
-5. Exit
+5. Fetch RSS feeds and save articles to the database
+6. Analyze stored articles with Ollama
+7. Exit
 """
 
 
@@ -62,6 +74,61 @@ def list_saved(conn):
             f"[{row['times_seen']}x] {row['incident_type']} - {address_oneline} "
             f"(last seen {row['last_seen']})"
         )
+
+
+def fetch_and_save_news(conn):
+    print("Fetching news feeds...")
+    articles = get_all_articles()
+
+    if not articles:
+        print("No articles found.")
+        return
+
+    new_count = 0
+    for title, link, published, summary, article_id in articles:
+        if log_article(conn, title, link, published, summary, article_id):
+            new_count += 1
+
+    print(f"Fetched {len(articles)} article(s), {new_count} new.")
+
+
+def analyze_stored_news(conn):
+    rows = get_unanalyzed_articles(conn)
+
+    if not rows:
+        print("Nothing to analyze - run option 5 first, or everything's already analyzed.")
+        return
+
+    print(f"Analyzing {len(rows)} article(s) with Ollama...\n")
+
+    # llm.analyze_articles() expects (title, link, published, summary,
+    # article_id) tuples - build them from the stored rows instead of
+    # re-fetching from the live feed.
+    tuples = [
+        (r["title"], r["link"], r["published"], r["summary"], r["article_id"])
+        for r in rows
+    ]
+    results = asyncio.run(analyze_articles(tuples))
+
+    for r in results:
+        print("---")
+        print(r["title"])
+        if r.get("error"):
+            print(f"  extraction failed: {r['error']}")
+            continue
+
+        print(f"  incident_type: {r['incident_type']}")
+        print(f"  location_mentioned: {r['location_mentioned']}")
+        print(f"  time_reference: {r['time_reference']}")
+        save_article_analysis(
+            conn,
+            r["article_id"],
+            r["incident_type"],
+            r["location_mentioned"],
+            r["time_reference"],
+        )
+
+    print("\nSaved analysis results to the database.")
 
 
 CONSECUTIVE_FAILURE_WARNING_THRESHOLD = 5
@@ -110,6 +177,8 @@ def main():
         "2": lambda: map_stored(conn),
         "3": lambda: list_saved(conn),
         "4": lambda: poll_loop(conn),
+        "5": lambda: fetch_and_save_news(conn),
+        "6": lambda: analyze_stored_news(conn),
     }
 
     try:
@@ -117,7 +186,7 @@ def main():
             print(MENU)
             choice = input("Select an option: ").strip()
 
-            if choice == "5":
+            if choice == "7":
                 print("Exiting.")
                 break
 
