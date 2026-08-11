@@ -37,8 +37,12 @@ def scrape_ycdes():
     """ Scrapes ycdes.org for currently active incidents.
 
     Returns:
-        list[tuple[str, str]]: an (address, incident_type) pair for
-        every active incident row.
+        list[tuple[str, str, str]]: an (address, incident_type,
+        dispatch_time) tuple for every active incident row.
+        dispatch_time is ycdes.org's own reported time, e.g.
+        "8/4/2026 11:52 PM" - kept as raw text; parsing happens
+        wherever it's actually needed (e.g. llm.py's cross-reference
+        step), not here.
     """
     output = send_get("https://www.ycdes.org/webcad/Default.aspx", timeout=10)
     parsed = BeautifulSoup(output, 'html.parser')
@@ -56,6 +60,7 @@ def scrape_ycdes():
             continue
 
         incident_type = cells[3].get_text(strip=True)  # Index 3 is "Incident Type"
+        dispatch_time = cells[1].get_text(strip=True)   # Index 1 is "Dispatch Time"
         #street = cells[4].get_text(strip=True)         # Index 4 is "Street"
         intersection = cells[6].get_text(strip=True)   # Index 6 is "Nearest Intersection"
         location = cells[7].get_text(strip=True)       # Index 7 is "Location"
@@ -63,9 +68,10 @@ def scrape_ycdes():
         full_address = f"{intersection}\n{location}"
         if debug:
             print(f"Incident Type: {incident_type}")
+            print(f"Dispatch Time: {dispatch_time}")
             print(f"Combined Address: {full_address}")
 
-        incidents.append((full_address, incident_type))
+        incidents.append((full_address, incident_type, dispatch_time))
 
     return incidents
 
