@@ -29,7 +29,7 @@ Polls every active incident from [ycdes.org WebCAD](https://www.ycdes.org/webcad
 | `map.py` | Cleans scraped addresses, geocodes via ArcGIS, and plots one or many incidents on a Folium map | Working |
 | `config.py` | Centralized config loader with sane defaults (debug, DB path, map tiles, poll interval, feed list, Ollama settings) | Working |
 | `config.json` | Optional runtime overrides but every key has a default, so this isn't required | Working |
-| `analysis.py` | Where the actual incident-vs-article comparison/matching logic will live | Not yet implemented |
+| `analysis.py` | Where the actual incident-vs-article comparison/matching logic will live | moved to llm.py |
 | `incident_map.html` | Generated output, a Folium/Leaflet map with a marker per stored incident | Example output |
 
 The pipeline now handles every active incident and every configured news feed, and persists both across runs instead of overwriting a single snapshot. `main.py` can also poll continuously and unattended (see [Setup](#setup)).
@@ -88,6 +88,9 @@ ollama pull qwen2.5:1.5b
   "ollama_model": "qwen2.5:1.5b",
   "ollama_num_ctx": 4096,
   "ollama_max_concurrent": 1
+  "ollama_model_temp": 0.1,
+  "cross_reference_time_window_hours": 6,
+  "cross_reference_location_threshold": 0.35
 }
 ```
 
@@ -101,6 +104,8 @@ ollama pull qwen2.5:1.5b
 | `ollama_model` | `"gemma4:e2b"` | Local Ollama model used for article extraction |
 | `ollama_num_ctx` | `4096` | Context window passed to Ollama per extraction call |
 | `ollama_max_concurrent` | `1` | How many articles to send to Ollama at once — local inference on modest hardware is realistically serial regardless, so raise this only once you've confirmed your machine can handle it |
+more descriptions coming as vars solidify in the plan!
+
 
 Then run:
 
@@ -117,7 +122,8 @@ York County Incident Tracker
 4. Start polling loop
 5. Fetch RSS feeds and save articles to the database
 6. Analyze stored articles with Ollama
-7. Exit
+7. Cross-reference incidents against analyzed articles
+8. Exit
 ```
 
 Option 4 leaves the process running in the foreground, polling on the interval set by `poll_interval_seconds`. A failed poll is logged and skipped rather than killing the loop, with a louder warning if failures start stacking up. Ctrl+C stops the loop and drops you back to the menu without exiting the program.
@@ -133,14 +139,14 @@ Options 5 and 6 are deliberately separate: 5 only fetches and stores raw article
 - [x] Add a news/RSS ingestion module, with persisted article storage
 - [x] Local LLM structured extraction from articles (incident type / location / time signals)
 - [ ] Persistent logging to file for long-running/headless polling sessions (right now output only goes to the terminal)
-- [ ] Basic analysis/dashboard comparing incident counts to news mentions over time (`analysis.py` — the actual matching logic between stored incidents and analyzed articles)
+- [ ] Basic analysis comparing incident counts to news mentions over time (implemented, but untested)
 - [ ] Evaluate scraping [717alerts.com](https://717alerts.com) as a secondary incident source.
 - [ ] Evaluate scraping [crimewatch.net](https://crimewatch.net) department pages.
 
 ## To Do
 
 - Stronger LLM Prompt/ output formatting
-- Make menu option 3 more dynamic to view all db contents
+- Make menu option 3 more dynamic to view all db contents - also have test data implementation options
 - Add more RSS feeds
 - Add visual progression/loading bar for intensive task (llm analysis)
 - database merging (for my older sessions, so previous data isn't irrelevant/unusable).
