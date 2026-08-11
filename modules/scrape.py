@@ -14,7 +14,7 @@ debug = config["debug"]
 headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept-Language": "en-US,en;q=0.9",}
 
-def send_get(url = str, timeout = int):
+def send_get(url = str, timeout: float = 10.0):
     """
     Sends a GET request to the specified URL and returns the response content.
 
@@ -68,3 +68,5 @@ def scrape_ycdes():
         incidents.append((full_address, incident_type))
 
     return incidents
+
+### Selenium Scraping ###
