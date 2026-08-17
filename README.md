@@ -101,7 +101,7 @@ ollama pull qwen2.5:1.5b
 | `map_tiles` | `"cartodbpositron"` | Folium basemap tile provider |
 | `poll_interval_seconds` | `240` | Delay between polls in the continuous loop — matches ycdes.org's own auto-refresh cadence |
 | `feed_urls` | ABC27's York feed | List of RSS/Atom feed URLs to pull for news-coverage comparison |
-| `ollama_model` | `"gemma4:e2b"` | Local Ollama model used for article extraction |
+| `ollama_model` | `"qwen2.5:1.5b"` | Local Ollama model used for article extraction |
 | `ollama_num_ctx` | `4096` | Context window passed to Ollama per extraction call |
 | `ollama_max_concurrent` | `1` | How many articles to send to Ollama at once — local inference on modest hardware is realistically serial regardless, so raise this only once you've confirmed your machine can handle it |
 more descriptions coming as vars solidify in the plan!
